@@ -1,0 +1,104 @@
+#!/usr/bin/python
+
+#Switch SNMP Interface Connectio list
+
+#Parameters:
+verbose = False
+SNMP_VERSION = 2
+SNMP_COMMUNITY = 0
+SNMP_HOST = 0
+skip=0
+return_code=0
+
+import getopt, sys
+import netsnmp
+import re
+
+def usage(exit_code):
+    print 'Gathers LLDP SNMP data from Switch'
+    print '%s -C <community> -H <hostname>' % sys.argv[0]
+    print 'Options'
+    print '-C or --community= SNMP Community'
+    print '-H or --host=      Host'
+    print '-h or --help       Show Help'
+    sys.exit(exit_code)
+
+#Parse Arguments
+try:
+    opts, args = getopt.getopt(sys.argv[1:],"C:H:h",["community=","host","help",])
+except getopt.GetoptError:
+        usage(2)
+for opt, arg in opts:
+    if opt in ("-h",   "--help"):
+        usage(0)
+    elif opt in ("-C", "--community"):
+        SNMP_COMMUNITY= arg
+    elif opt in ("-H", "--host"):
+        SNMP_HOST = arg
+
+#require parameters
+if not SNMP_COMMUNITY or not SNMP_HOST:
+    usage(2)
+
+
+args = {
+         "Version": SNMP_VERSION,
+         "DestHost": SNMP_HOST,
+         "Community": SNMP_COMMUNITY,
+         "Timeout": 3000000,
+         "Retries": 1,
+         }
+
+session = netsnmp.Session (**args)
+
+dataPoints = {
+        'ifDescr':         {'mib': 'IF-MIB::ifDescr', 'port' : {} },
+        'ifAlias':         {'mib': 'IF-MIB::ifAlias', 'port' : {} },
+        'ifOperStatus':    {'mib': 'IF-MIB::ifOperStatus', 'port' : {} },
+        'ifAdminStatus':   {'mib': 'IF-MIB::ifAdminStatus', 'port' : {} },
+        'lldpRemSysName':  {'mib': 'LLDP-MIB::lldpRemSysName', 'port' : {} },
+        'lldpRemPortId':  {'mib': 'LLDP-MIB::lldpRemPortId"', 'port' : {} },
+        'lldpRemPortDesc': {'mib': 'LLDP-MIB::lldpRemPortDesc', 'port' : {} },
+        }
+
+#assign a request for each dataPoints we need
+varList=[]
+for item in dataPoints:
+    varList.append(netsnmp.Varbind(dataPoints[item]['mib']))
+
+bulkVars = netsnmp.VarList( *varList )
+#bulk request with all dataPoints we need
+values = session.getbulk(0, 16, bulkVars)
+if not values:
+    print("Could not get SNMP data from host")
+    exit(3)
+
+#assign the results to our dictionoary
+totalPorts=len(values)/len(dataPoints)
+counter=0
+for port in xrange(totalPorts):
+    for item in dataPoints:
+        dataPoints[item]['port'].update( { port : values[counter] } )
+        counter+=1
+    
+#Header
+print('switch,port<=connects-to=>portId,portDesc,device')
+
+for port in xrange(totalPorts):
+    #Skip ports that are shutdown
+    if dataPoints['ifAdminStatus']['port'][port] == '2':
+        continue
+    #replace hex to mac address string
+    if not dataPoints['lldpRemPortId']['port'][port].isalnum():
+        dataPoints['lldpRemPortId']['port'][port]=dataPoints['lldpRemPortId']['port'][port].encode('hex')
+    #change interface name 'Interface   4 as eth0' to eth0'
+    if re.search('^Interface\ +[0-9]+ as [a-z0-9]+',dataPoints['lldpRemPortDesc']['port'][port]):
+        dataPoints['lldpRemPortDesc']['port'][port]=re.sub('^Interface\ +[0-9]+ as ','',dataPoints['lldpRemPortDesc']['port'][port])
+    print ("%s,%s<=connects-to=>%s,%s,%s" % ( SNMP_HOST, 
+                                              dataPoints['ifDescr']['port'][port], 
+                                              dataPoints['lldpRemPortId']['port'][port], 
+                                              dataPoints['lldpRemPortDesc']['port'][port], 
+                                              dataPoints['lldpRemSysName']['port'][port])
+    )
+
+exit(return_code)
