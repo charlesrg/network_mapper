@@ -1,6 +1,13 @@
 #!/usr/bin/python
 
-#Switch SNMP Interface Connectio list
+#Switch SNMP Interface Wire list
+
+
+#TODO
+    #Handle Interfaces OperStatus
+    #Handle Port Channels
+    #Is it possible to handle vlan's ?
+
 
 #Parameters:
 verbose = False
@@ -46,45 +53,47 @@ args = {
          "DestHost": SNMP_HOST,
          "Community": SNMP_COMMUNITY,
          "Timeout": 3000000,
-         "Retries": 1,
+         "Retries": 3,
          }
 
 session = netsnmp.Session (**args)
 
 dataPoints = {
-        'ifDescr':         {'mib': 'IF-MIB::ifDescr', 'port' : {} },
-        'ifAlias':         {'mib': 'IF-MIB::ifAlias', 'port' : {} },
-        'ifOperStatus':    {'mib': 'IF-MIB::ifOperStatus', 'port' : {} },
-        'ifAdminStatus':   {'mib': 'IF-MIB::ifAdminStatus', 'port' : {} },
-        'lldpRemSysName':  {'mib': 'LLDP-MIB::lldpRemSysName', 'port' : {} },
-        'lldpRemPortId':  {'mib': 'LLDP-MIB::lldpRemPortId"', 'port' : {} },
-        'lldpRemPortDesc': {'mib': 'LLDP-MIB::lldpRemPortDesc', 'port' : {} },
+        'ifDescr':         {'mib': 'IF-MIB::ifDescr', 'port' : [] },
+        'ifAlias':         {'mib': 'IF-MIB::ifAlias', 'port' : [] },
+#        'ifOperStatus':    {'mib': 'IF-MIB::ifOperStatus', 'port' : {} }, #TBD write unknown to ports that should be up but aren't
+        'ifAdminStatus':   {'mib': 'IF-MIB::ifAdminStatus', 'port' : [] },
+        'lldpRemSysName':  {'mib': 'LLDP-MIB::lldpRemSysName', 'port' : [] },
+        'lldpRemPortId':   {'mib': 'LLDP-MIB::lldpRemPortId', 'port' : [] },
+        'lldpRemPortDesc': {'mib': 'LLDP-MIB::lldpRemPortDesc', 'port' : [] },
         }
 
-#assign a request for each dataPoints we need
-varList=[]
-for item in dataPoints:
-    varList.append(netsnmp.Varbind(dataPoints[item]['mib']))
+#Get the total number of interfaces on the switch
+try: 
+    ifNumber=session.get(netsnmp.VarList(netsnmp.Varbind('IF-MIB::ifNumber',0)))
+    totalInterfaces=int(ifNumber[0])
+except:
+    print "Could not get the list of Interfaces on the device"
+    exit(4)
 
-bulkVars = netsnmp.VarList( *varList )
 #bulk request with all dataPoints we need
-values = session.getbulk(0, 16, bulkVars)
-if not values:
-    print("Could not get SNMP data from host")
-    exit(3)
+for item in dataPoints:
+    #bind the variable list
+    bulkVar = netsnmp.VarList( netsnmp.Varbind(dataPoints[item]['mib']))
+    #Send SNMP query
+    snmpData=session.getbulk(0, totalInterfaces, bulkVar)
+    if not snmpData:
+        print("Could not get SNMP data from host")
+        exit(3)
+    #assign the results to our dictionary
+    for idx in xrange(len(snmpData)):
+        dataPoints[item]['port'].append(snmpData[idx])
 
-#assign the results to our dictionoary
-totalPorts=len(values)/len(dataPoints)
-counter=0
-for port in xrange(totalPorts):
-    for item in dataPoints:
-        dataPoints[item]['port'].update( { port : values[counter] } )
-        counter+=1
-    
+
 #Header
 print('switch,port<=connects-to=>portId,portDesc,device')
 
-for port in xrange(totalPorts):
+for port in xrange(len(dataPoints['ifAdminStatus']['port'])):
     #Skip ports that are shutdown
     if dataPoints['ifAdminStatus']['port'][port] == '2':
         continue
@@ -94,6 +103,10 @@ for port in xrange(totalPorts):
     #change interface name 'Interface   4 as eth0' to eth0'
     if re.search('^Interface\ +[0-9]+ as [a-z0-9]+',dataPoints['lldpRemPortDesc']['port'][port]):
         dataPoints['lldpRemPortDesc']['port'][port]=re.sub('^Interface\ +[0-9]+ as ','',dataPoints['lldpRemPortDesc']['port'][port])
+    #Ignore Port Channels and Vlans
+    if re.search('^(Port-Channel|Vlan)[0-9]+$',dataPoints['ifDescr']['port'][port]):
+        continue
+
     print ("%s,%s<=connects-to=>%s,%s,%s" % ( SNMP_HOST, 
                                               dataPoints['ifDescr']['port'][port], 
                                               dataPoints['lldpRemPortId']['port'][port], 
@@ -102,3 +115,18 @@ for port in xrange(totalPorts):
     )
 
 exit(return_code)
+
+vars = netsnmp.VarList(netsnmp.Varbind('IF-MIB::ifDescr'),
+                       netsnmp.Varbind('IF-MIB::ifAlias'),
+                       netsnmp.Varbind('IF-MIB::ifAdminStatus'),
+                       netsnmp.Varbind('LLDP-MIB::lldpRemSysName'),
+                       netsnmp.Varbind('LLDP-MIB::lldpRemPortId'),
+                       netsnmp.Varbind('LLDP-MIB::lldpRemPortDesc'))
+
+vals = session.getbulk(0, 16, vars)
+print "v2 session.getbulk result: ", vals, "\n"
+
+for var in vars:
+ print var.tag, var.iid, "=", var.val, '(',var.type,')'
+
+print "\n"    
