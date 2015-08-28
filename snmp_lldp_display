@@ -98,7 +98,7 @@ for port in xrange(len(varBindTable)):
             dataPoints[item]['port'][portNumber]= varBindTable[port][dataPoints.keys().index(item)][1]
 
 #Header
-print('switch,port<=connects-to=>portId,portDesc,device')
+#print('switch,port<=connects-to=>portId,portDesc,device')
 
 for port in dataPoints['lldpRemSysName']['port']:
     #replace hex to mac address string
@@ -115,27 +115,12 @@ for port in dataPoints['lldpRemSysName']['port']:
     #NO LLDP Data Nothing to show
     if dataPoints['ifDescr']['port'][port] == 6:
         continue
-
-    print ("%s,%s<=connects-to=>%s,%s,%s" % ( SNMP_HOST, 
-                                              dataPoints['ifDescr']['port'][port], 
-                                              dataPoints['lldpRemPortId']['port'][port], 
-                                              dataPoints['lldpRemPortDesc']['port'][port], 
-                                              dataPoints['lldpRemSysName']['port'][port])
-    )
+    if str(dataPoints['ifAlias']['port'][port]).lower() not in str(dataPoints['lldpRemSysName']['port'][port]).lower():
+        print ("%s %s <----> %s" % ( 
+                                                  dataPoints['ifDescr']['port'][port], 
+                                                  dataPoints['ifAlias']['port'][port], 
+                                                  dataPoints['lldpRemSysName']['port'][port])
+        )
 
 exit(return_code)
 
-vars = netsnmp.VarList(netsnmp.Varbind('IF-MIB::ifDescr'),
-                       netsnmp.Varbind('IF-MIB::ifAlias'),
-                       netsnmp.Varbind('IF-MIB::ifAdminStatus'),
-                       netsnmp.Varbind('LLDP-MIB::lldpRemSysName'),
-                       netsnmp.Varbind('LLDP-MIB::lldpRemPortId'),
-                       netsnmp.Varbind('LLDP-MIB::lldpRemPortDesc'))
-
-vals = session.getbulk(0, 16, vars)
-print "v2 session.getbulk result: ", vals, "\n"
-
-for var in vars:
- print var.tag, var.iid, "=", var.val, '(',var.type,')'
-
-print "\n"    
